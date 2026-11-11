@@ -1,0 +1,9 @@
+# Configuração do gitleaks — usada localmente e no CI.
+# Mantém TODAS as regras padrão e suprime apenas falsos positivos verificados.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Segredos fictícios dos testes — o próprio valor diz o que é"
+regexes = ['''segredo-de-teste-com-mais-de-32-caracteres''', '''segredo-webhook-de-teste''']
