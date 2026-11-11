@@ -1,5 +1,9 @@
 # oficina-billing — Billing Service
 
+[![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=ProblemaTheu_oficina-billing&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=ProblemaTheu_oficina-billing)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=ProblemaTheu_oficina-billing&metric=coverage)](https://sonarcloud.io/component_measures?id=ProblemaTheu_oficina-billing&metric=coverage)
+[![CI](https://github.com/ProblemaTheu/oficina-billing/actions/workflows/ci.yml/badge.svg)](https://github.com/ProblemaTheu/oficina-billing/actions/workflows/ci.yml)
+
 **Orçamento e pagamento** da oficina, com cobrança real pelo **Mercado Pago**. Um dos três microsserviços da Fase 4 do Tech Challenge (SOAT), ao lado do [OS Service](https://github.com/ProblemaTheu/oficina-app) e do [Execution Service](https://github.com/ProblemaTheu/oficina-execution).
 
 ## O que faz — e o que não faz
@@ -90,6 +94,16 @@ O **stub** reproduz o comportamento validado no sandbox: recusa deixa a order em
 | `Integração (PostgreSQL)` | migrations, orçamento único por OS, transição condicional (webhook × reconciliador), outbox, inbox |
 | `Integração (LocalStack)` | mensageria contra SQS FIFO real |
 | `SonarCloud` | quality gate (`sonar.qualitygate.wait=true`) |
+
+## Documentação
+
+| Documento | Conteúdo |
+|---|---|
+| [docs/arquitetura.md](docs/arquitetura.md) | Componentes, mensagens consumidas/produzidas, modelo de dados |
+| [docs/openapi.yaml](docs/openapi.yaml) | Contrato da API (OpenAPI 3) |
+| [Arquitetura da Fase 4](https://github.com/ProblemaTheu/oficina-app/blob/main/docs/planejamentos/fase-4/arquitetura.md) | Os 3 serviços, a saga e o catálogo de mensagens |
+| [RFC-006 — Saga](https://github.com/ProblemaTheu/oficina-app/blob/main/docs/rfcs/RFC-006-saga-e-consistencia-distribuida.md) · [ADRs 009–016](https://github.com/ProblemaTheu/oficina-app/blob/main/docs/architecture-decisions.md) | Decisões |
+| [Coleção Postman da Fase 4](https://github.com/ProblemaTheu/oficina-app/blob/main/docs/postman/fase-4-saga.json) | Fluxo completo da saga |
 
 ## Ambientes
 
