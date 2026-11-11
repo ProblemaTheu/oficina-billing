@@ -1,0 +1,247 @@
+openapi: 3.0.3
+info:
+  title: Billing Service — Oficina (Fase 4)
+  version: 1.0.0
+  description: |
+    Orçamento e pagamento da ordem de serviço. Participante da saga orquestrada
+    pelo OS Service: os orçamentos são **criados pela saga** (comando
+    `GerarOrcamento`), não por esta API. Aqui o cliente (ou um funcionário)
+    consulta, aprova ou recusa; aprovar cria a cobrança no Mercado Pago
+    (Checkout Pro, API de Orders) e devolve o link de pagamento.
+
+    Autenticação: o mesmo JWT do OS Service (HS256, `aud=oficina-api`).
+    Funcionário (`tipo=usuario` ou sem `tipo`) vê e decide qualquer orçamento;
+    cliente (`tipo=cliente`, emitido pela Lambda de CPF) só o próprio.
+
+    Valores monetários são strings decimais com 2 casas (`"379.80"`) —
+    internamente, centavos inteiros.
+servers:
+  - url: http://localhost:8081
+    description: Local (docker-compose.saga.yml)
+  - url: https://{apiId}.execute-api.us-east-1.amazonaws.com
+    description: Produção (API Gateway)
+    variables:
+      apiId:
+        default: xxxxxxxxxx
+security:
+  - bearerAuth: []
+tags:
+  - name: Orçamentos
+  - name: Webhooks
+  - name: Saúde
+paths:
+  /billing/v1/orcamentos:
+    get:
+      tags: [Orçamentos]
+      summary: Orçamento de uma OS
+      operationId: orcamentoPorOS
+      parameters:
+        - name: os_id
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Orçamento (com o pagamento, se já aprovado)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Orcamento' }
+        '400': { $ref: '#/components/responses/Validacao' }
+        '401': { $ref: '#/components/responses/NaoAutorizado' }
+        '403': { $ref: '#/components/responses/Proibido' }
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
+  /billing/v1/orcamentos/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdOrcamento'
+    get:
+      tags: [Orçamentos]
+      summary: Consulta um orçamento
+      operationId: consultarOrcamento
+      responses:
+        '200':
+          description: Orçamento
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Orcamento' }
+        '400': { $ref: '#/components/responses/Validacao' }
+        '401': { $ref: '#/components/responses/NaoAutorizado' }
+        '403': { $ref: '#/components/responses/Proibido' }
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
+  /billing/v1/orcamentos/{id}/aprovar:
+    parameters:
+      - $ref: '#/components/parameters/IdOrcamento'
+    post:
+      tags: [Orçamentos]
+      summary: Aprova o orçamento e cria a cobrança no Mercado Pago
+      description: |
+        Cria a order no Mercado Pago e responde com `pagamento.link_pagamento`.
+        A saga recebe `OrcamentoAprovado`. Repetir a chamada devolve o mesmo link
+        (idempotente). Se o Mercado Pago falhar, nada é gravado (`502`) e o
+        cliente pode tentar de novo.
+      operationId: aprovarOrcamento
+      responses:
+        '200':
+          description: Orçamento aprovado, com o link de pagamento
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Orcamento' }
+              example:
+                id: 7d1c0a52-2f4b-4c3e-9d8e-1a2b3c4d5e6f
+                os_id: 2b9f6c1e-8a7d-4e5f-b3c2-0d1e2f3a4b5c
+                numero_os: OS-2026-00042
+                status: aprovado
+                diagnostico: amortecedor dianteiro vazando
+                itens:
+                  - { tipo: peca, nome: Amortecedor, quantidade: 2, preco_unitario: '189.90', subtotal: '379.80' }
+                valor_total: '379.80'
+                pagamento:
+                  id: 0f9e8d7c-6b5a-4c3d-2e1f-0a9b8c7d6e5f
+                  status: pendente
+                  link_pagamento: https://www.mercadopago.com.br/checkout/v1/redirect?pref_id=...
+                  valor: '379.80'
+                  mp_order_id: ORD01JXXXXXXXXXXXX
+                criado_em: '2026-11-11T15:00:00Z'
+        '401': { $ref: '#/components/responses/NaoAutorizado' }
+        '403': { $ref: '#/components/responses/Proibido' }
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
+        '409': { $ref: '#/components/responses/Conflito' }
+        '502': { $ref: '#/components/responses/Dependencia' }
+  /billing/v1/orcamentos/{id}/recusar:
+    parameters:
+      - $ref: '#/components/parameters/IdOrcamento'
+    post:
+      tags: [Orçamentos]
+      summary: Recusa o orçamento
+      description: A saga recebe `OrcamentoRecusado` e compensa (OS cancelada, reserva liberada).
+      operationId: recusarOrcamento
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                motivo: { type: string, example: caro demais }
+      responses:
+        '200':
+          description: Orçamento recusado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Orcamento' }
+        '401': { $ref: '#/components/responses/NaoAutorizado' }
+        '403': { $ref: '#/components/responses/Proibido' }
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
+        '409': { $ref: '#/components/responses/Conflito' }
+  /billing/webhooks/mercadopago:
+    post:
+      tags: [Webhooks]
+      summary: Notificação do Mercado Pago (Orders)
+      description: |
+        Sem JWT: autenticado pelo header `x-signature` (`ts=<seg>,v1=<hmac>`),
+        HMAC-SHA256 com o segredo do webhook sobre o manifesto
+        `id:<data.id em minúsculas>;request-id:<x-request-id>;ts:<ts>;`.
+        O corpo **não** é confiado: o Billing consulta `GET /v1/orders/{id}` e
+        aplica o estado real. Order desconhecida (ex.: simulação do painel)
+        responde `200`. Falha ao consultar responde `500` para o MP reenviar.
+      operationId: webhookMercadoPago
+      security: []
+      parameters:
+        - { name: data.id, in: query, required: true, schema: { type: string } }
+        - { name: type, in: query, required: true, schema: { type: string, example: order } }
+        - { name: x-signature, in: header, required: true, schema: { type: string, example: 'ts=1762880000,v1=5f2c…' } }
+        - { name: x-request-id, in: header, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200': { description: Processado (ou ignorado por não ser `order`) }
+        '401': { $ref: '#/components/responses/NaoAutorizado' }
+        '500': { description: Falha ao consultar a order; o MP reenvia }
+  /health/live:
+    get:
+      tags: [Saúde]
+      summary: Liveness
+      security: []
+      responses:
+        '200': { description: Processo vivo }
+  /health/ready:
+    get:
+      tags: [Saúde]
+      summary: Readiness (consulta o PostgreSQL)
+      security: []
+      responses:
+        '200': { description: Pronto }
+        '503': { description: Banco indisponível }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    IdOrcamento:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  schemas:
+    Item:
+      type: object
+      required: [nome, quantidade, preco_unitario, subtotal]
+      properties:
+        tipo: { type: string, enum: [servico, peca] }
+        nome: { type: string }
+        quantidade: { type: integer, minimum: 1 }
+        preco_unitario: { type: string, example: '189.90' }
+        subtotal: { type: string, example: '379.80' }
+    Pagamento:
+      type: object
+      required: [id, status, valor]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [pendente, aprovado, recusado, estornado, cancelado] }
+        link_pagamento: { type: string, format: uri, description: checkout do Mercado Pago }
+        valor: { type: string, example: '379.80' }
+        mp_order_id: { type: string }
+    Orcamento:
+      type: object
+      required: [id, os_id, status, itens, valor_total, criado_em]
+      properties:
+        id: { type: string, format: uuid }
+        os_id: { type: string, format: uuid }
+        numero_os: { type: string }
+        status: { type: string, enum: [gerado, aprovado, recusado, cancelado] }
+        diagnostico: { type: string }
+        itens:
+          type: array
+          items: { $ref: '#/components/schemas/Item' }
+        valor_total: { type: string, example: '379.80' }
+        motivo: { type: string, description: motivo da recusa ou do cancelamento }
+        pagamento: { $ref: '#/components/schemas/Pagamento' }
+        criado_em: { type: string, format: date-time }
+    Erro:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string }
+        message: { type: string }
+  responses:
+    Validacao:
+      description: Parâmetro inválido (`VALIDATION_ERROR`)
+      content: { application/json: { schema: { $ref: '#/components/schemas/Erro' } } }
+    NaoAutorizado:
+      description: Token ou assinatura ausente/inválida
+      content: { application/json: { schema: { $ref: '#/components/schemas/Erro' } } }
+    Proibido:
+      description: Cliente acessando orçamento de outro cliente (`ACCESS_DENIED`)
+      content: { application/json: { schema: { $ref: '#/components/schemas/Erro' } } }
+    NaoEncontrado:
+      description: Orçamento não encontrado (`NOT_FOUND`)
+      content: { application/json: { schema: { $ref: '#/components/schemas/Erro' } } }
+    Conflito:
+      description: Transição inválida, ex. aprovar orçamento cancelado (`CONFLITO`)
+      content: { application/json: { schema: { $ref: '#/components/schemas/Erro' } } }
+    Dependencia:
+      description: Mercado Pago indisponível (`ERRO_DEPENDENCIA`); nada foi gravado
+      content: { application/json: { schema: { $ref: '#/components/schemas/Erro' } } }
