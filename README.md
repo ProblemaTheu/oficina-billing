@@ -87,6 +87,14 @@ O **stub** reproduz o comportamento validado no sandbox: recusa deixa a order em
 
 **Cobertura unitária: 97,9%**, no critério do Sonar — exclui `cmd/` e os adaptadores Postgres (`internal/infra/repository`, `database`), cobertos pelos testes de integração. O cliente do Mercado Pago é testado **contra o stub por HTTP** (os dois validados juntos), incluindo retry só em rede/5xx.
 
+### Evidências de cobertura e de proteção da `main`
+
+![Cobertura de testes unitários por pacote](docs/evidencias/cobertura.png)
+
+Gerado por `./scripts/cobertura.sh` (o mesmo gate de **80%** que roda no CI e no job de testes do CD, antes do build da imagem). A cobertura publicada no SonarCloud usa o mesmo critério: badge **Coverage** no topo deste README.
+
+A `main` é protegida por ruleset: só entra por **pull request aprovado**, sem push direto, sem force-push e sem deleção. Prova em [`docs/evidencias/push-main-rejeitado.txt`](docs/evidencias/push-main-rejeitado.txt): `push declined due to repository rule violations`.
+
 | Check do CI | O que valida |
 |---|---|
 | `Build e testes` | build, testes com `-race`, **cobertura ≥ 80%** |
