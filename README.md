@@ -3,6 +3,7 @@
 [![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=ProblemaTheu_oficina-billing&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=ProblemaTheu_oficina-billing)
 [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=ProblemaTheu_oficina-billing&metric=coverage)](https://sonarcloud.io/component_measures?id=ProblemaTheu_oficina-billing&metric=coverage)
 [![CI](https://github.com/ProblemaTheu/oficina-billing/actions/workflows/ci.yml/badge.svg)](https://github.com/ProblemaTheu/oficina-billing/actions/workflows/ci.yml)
+[![CD](https://github.com/ProblemaTheu/oficina-billing/actions/workflows/cd.yml/badge.svg)](https://github.com/ProblemaTheu/oficina-billing/actions/workflows/cd.yml)
 
 **Orçamento e pagamento** da oficina, com cobrança real pelo **Mercado Pago**. Um dos três microsserviços da Fase 4 do Tech Challenge (SOAT), ao lado do [OS Service](https://github.com/ProblemaTheu/oficina-app) e do [Execution Service](https://github.com/ProblemaTheu/oficina-execution).
 
@@ -108,3 +109,23 @@ O **stub** reproduz o comportamento validado no sandbox: recusa deixa a order em
 ## Ambientes
 
 Só `prod` é implantado; homologação dispensada conforme orientação do fórum (mesma decisão da Fase 3).
+
+## Infraestrutura e deploy
+
+| Pasta | O que tem |
+|---|---|
+| [`infra/`](infra/) | Terraform **do serviço**: fila `billing-commands.fifo` + DLQ (redrive após 5), **RDS PostgreSQL próprio** (`oficina-billing`, criptografado, subnet privada, SG aceitando só os nós do EKS), segredo `oficina/prod/billing/db`, role do pod por **EKS Pod Identity** (consome só a própria fila, envia só para `os-saga-replies.fifo`), alarme da DLQ (CloudWatch + SNS) e o contrato SSM |
+| [`k8s/`](k8s/) | `base` (ServiceAccount, ConfigMap, Deployment com 1 réplica, Service) + `overlays/prod` (namespace `billing-prod`, Classic Load Balancer) |
+| [`.github/workflows/cd.yml`](.github/workflows/cd.yml) | `Testes (gate de 80%)` → `Build e push` (Docker Hub, tag = SHA) → `Deploy no EKS` (SSM → ConfigMap `billing-ambiente`, `kubectl apply -k`, `rollout status`, smoke `/health/ready`, rollback automático, marcador no New Relic) |
+
+O deploy só roda com a variable `DEPLOY_ENABLED=true` (sem cluster, a imagem continua sendo publicada a cada merge). O `infra/` é aplicado localmente (corte 15 do plano: a role de CD só descreve o cluster e lê a SSM).
+
+**Ordem na primeira subida** (a partir do `oficina-infra-k8s` aplicado, com os namespaces e as access entries):
+
+```bash
+cd infra && terraform init && terraform apply        # fila, RDS, role do pod, SSM
+./scripts/prod-secret.sh                             # Secret billing-secrets (pede o token do MP na 1ª vez)
+gh workflow run cd.yml                               # ou merge na main
+```
+
+Contrato SSM publicado: `/oficina/prod/billing/fila-comandos-url`, `/oficina/prod/billing/db/host`, `/oficina/prod/billing/db/secret_arn`. Consumido: `/oficina/shared/{vpc,eks}/*`, `/oficina/prod/os/fila-respostas-url`, `/oficina/prod/apigw/url`.
