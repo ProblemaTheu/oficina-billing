@@ -1,0 +1,32 @@
+# Configuração estática. O que depende do ambiente provisionado (URLs das
+# filas, host do RDS, URL pública) vem do ConfigMap billing-ambiente, gerado
+# pelo CD a partir da SSM — envFrom posterior, então sobrescreve este.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: billing-config
+  labels:
+    app.kubernetes.io/name: billing
+    app.kubernetes.io/part-of: oficina
+data:
+  PORTA: "8080"
+  LOG_LEVEL: info
+  # O SDK da AWS não descobre a região sozinho com Pod Identity.
+  AWS_REGION: us-east-1
+
+  DB_PORT: "5432"
+  DB_NAME: billing
+  # O RDS recusa conexão sem TLS (rds.force_ssl=1 no PostgreSQL 15+).
+  DB_SSLMODE: require
+
+  MP_BASE_URL: https://api.mercadopago.com
+  # Reconciliador: mecanismo principal de confirmação de pagamento (orders de
+  # teste não disparam webhook — ver diário da Fase 4, 10/11).
+  MP_RECONCILIAR_INTERVALO: 10s
+
+  # E-mail do orçamento: "log" no EKS (SES fora do escopo); SMTP real é
+  # demonstrado no compose com o Mailpit.
+  NOTIFIER: log
+  EMAIL_FROM: billing@oficina.local
+
+  NEW_RELIC_APP_NAME: oficina-billing-prod
