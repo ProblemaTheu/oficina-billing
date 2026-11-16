@@ -111,7 +111,7 @@ A `main` é protegida por ruleset: só entra por **pull request aprovado**, sem 
 | [docs/arquitetura.md](docs/arquitetura.md) | Componentes, mensagens consumidas/produzidas, modelo de dados |
 | [docs/openapi.yaml](docs/openapi.yaml) | Contrato da API (OpenAPI 3) |
 | [Arquitetura da Fase 4](https://github.com/ProblemaTheu/oficina-app/blob/main/docs/planejamentos/fase-4/arquitetura.md) | Os 3 serviços, a saga e o catálogo de mensagens |
-| [RFC-006 — Saga](https://github.com/ProblemaTheu/oficina-app/blob/main/docs/rfcs/RFC-006-saga-e-consistencia-distribuida.md) · [ADRs 009–016](https://github.com/ProblemaTheu/oficina-app/blob/main/docs/architecture-decisions.md) | Decisões |
+| [RFC-006 — Saga](https://github.com/ProblemaTheu/oficina-app/blob/main/docs/rfcs/RFC-006-saga-e-consistencia-distribuida.md) · [ADRs 009–017](https://github.com/ProblemaTheu/oficina-app/blob/main/docs/architecture-decisions.md) | Decisões |
 | [Coleção Postman da Fase 4](https://github.com/ProblemaTheu/oficina-app/blob/main/docs/postman/fase-4-saga.json) | Fluxo completo da saga |
 
 ## Ambientes
@@ -124,9 +124,11 @@ Só `prod` é implantado; homologação dispensada conforme orientação do fór
 |---|---|
 | [`infra/`](infra/) | Terraform **do serviço**: fila `billing-commands.fifo` + DLQ (redrive após 5), **RDS PostgreSQL próprio** (`oficina-billing`, criptografado, subnet privada, SG aceitando só os nós do EKS), segredo `oficina/prod/billing/db`, role do pod por **EKS Pod Identity** (consome só a própria fila, envia só para `os-saga-replies.fifo`), alarme da DLQ (CloudWatch + SNS) e o contrato SSM |
 | [`k8s/`](k8s/) | `base` (ServiceAccount, ConfigMap, Deployment com 1 réplica, Service) + `overlays/prod` (namespace `billing-prod`, Classic Load Balancer) |
-| [`.github/workflows/cd.yml`](.github/workflows/cd.yml) | `Testes (gate de 80%)` → `Build e push` (Docker Hub, tag = SHA) → `Deploy no EKS` (SSM → ConfigMap `billing-ambiente`, `kubectl apply -k`, `rollout status`, smoke `/health/ready`, rollback automático, marcador no New Relic) |
+| [`.github/workflows/cd.yml`](.github/workflows/cd.yml) | `Testes (gate de 80%)` → `Build e push` (Docker Hub, tag = SHA) → `Deploy no Kubernetes (kind)` ou `Deploy no EKS` (SSM → ConfigMap `billing-ambiente`, `kubectl apply -k`, `rollout status`, smoke `/health/ready`, rollback automático, marcador no New Relic) |
 
-O deploy só roda com a variable `DEPLOY_ENABLED=true` (sem cluster, a imagem continua sendo publicada a cada merge). O `infra/` é aplicado localmente (corte 15 do plano: a role de CD só descreve o cluster e lê a SSM).
+**Destino do deploy:** por padrão, o job **`Deploy no Kubernetes (kind)`** cria um cluster kind no runner, sobe as dependências do serviço, aplica estes manifests com a imagem recém-publicada (tag = SHA) e valida com `rollout status` e smoke `/health/ready`. Com a variable `DEPLOY_ENABLED=true`, o deploy vai para o EKS (namespace `billing-prod`). O script e os manifests das dependências estão em [`oficina-app/local`](https://github.com/ProblemaTheu/oficina-app/tree/main/local), que também sobe os 3 serviços num Kubernetes local para desenvolvimento e demonstração ([ADR-017](https://github.com/ProblemaTheu/oficina-app/blob/main/docs/architecture-decisions.md#adr-017--ambiente-kubernetes-local-e-deploy-em-kind-no-cd)).
+
+O `infra/` é aplicado localmente (corte 15 do plano: a role de CD só descreve o cluster e lê a SSM).
 
 **Ordem na primeira subida** (a partir do `oficina-infra-k8s` aplicado, com os namespaces e as access entries):
 
